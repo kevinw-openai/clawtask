@@ -3,6 +3,8 @@
 import type { ErrorPayload, TaskStatus } from "./types";
 import { TASK_STATUSES } from "./types";
 import { openDatabase } from "./db";
+import { listenForTasks } from "./listener";
+import { buildSnapshot } from "./snapshot";
 import { TaskStore, TaskStoreError } from "./task-store";
 
 interface ParsedArgs {
@@ -10,16 +12,17 @@ interface ParsedArgs {
   flags: Map<string, string | boolean>;
 }
 
-function main(): number {
+async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2));
-  const db = openDatabase();
+  const projectDir = optionalString(parsed.flags, "project");
+  const db = openDatabase(undefined, projectDir);
   const store = new TaskStore(db);
 
   try {
     if (parsed.positionals.length === 0 || parsed.positionals[0] === "help") {
       throw new CliUsageError(
         "USAGE_ERROR",
-        "Missing command. Use create, list, show, claim, status, cancel, event, or subtask create.",
+        "Missing command. Use create, list, show, claim, status, cancel, event, listen, snapshot, or subtask create.",
       );
     }
 
@@ -35,6 +38,7 @@ function main(): number {
             assignedToAgentId: requiredString(parsed.flags, "to"),
             title: requiredString(parsed.flags, "title"),
             body: requiredString(parsed.flags, "body"),
+            metadata: parseJsonObjectFlag(parsed.flags, "metadata"),
           }),
         };
         break;
@@ -96,6 +100,27 @@ function main(): number {
           task: handleSubtask(store, parsed),
         };
         break;
+      case "listen":
+        result = {
+          ok: true,
+          ...(await listenForTasks(store, {
+            agentId: requiredString(parsed.flags, "agent"),
+            projectDir,
+            once: parsed.flags.get("once") === true,
+            pollMs: optionalPositiveInteger(parsed.flags, "poll-ms"),
+            maxTasks: optionalPositiveInteger(parsed.flags, "max-tasks"),
+            thinking: optionalString(parsed.flags, "thinking"),
+            timeoutSeconds: optionalPositiveInteger(parsed.flags, "timeout"),
+            resumeWaitMs: optionalPositiveInteger(parsed.flags, "resume-wait-ms"),
+            clawtaskCommand: optionalString(parsed.flags, "clawtask-command"),
+          })),
+        };
+        break;
+      case "snapshot":
+        result = await buildSnapshot(store, {
+          projectDir,
+        });
+        break;
       default:
         throw new CliUsageError("USAGE_ERROR", `Unknown command: ${command}`);
     }
@@ -146,6 +171,7 @@ function handleSubtask(store: TaskStore, parsed: ParsedArgs): unknown {
     assignedToAgentId: requiredString(parsed.flags, "to"),
     title: requiredString(parsed.flags, "title"),
     body: requiredString(parsed.flags, "body"),
+    metadata: parseJsonObjectFlag(parsed.flags, "metadata"),
   });
 }
 
@@ -224,6 +250,34 @@ function parseJsonFlag(flags: Map<string, string | boolean>, key: string): unkno
   }
 }
 
+function parseJsonObjectFlag(
+  flags: Map<string, string | boolean>,
+  key: string,
+): Record<string, unknown> {
+  const value = parseJsonFlag(flags, key);
+  if (value != null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  throw new CliUsageError("INVALID_JSON", `Flag --${key} must parse to a JSON object`);
+}
+
+function optionalPositiveInteger(
+  flags: Map<string, string | boolean>,
+  key: string,
+): number | undefined {
+  const value = optionalString(flags, key);
+  if (value == null) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new CliUsageError("USAGE_ERROR", `Flag --${key} must be a positive integer`);
+  }
+  return parsed;
+}
+
 function writeJson(payload: unknown): void {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
@@ -259,4 +313,6 @@ class CliUsageError extends Error {
   }
 }
 
-process.exitCode = main();
+void main().then((code) => {
+  process.exitCode = code;
+});
