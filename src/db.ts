@@ -1,16 +1,29 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_DB_PATH = join(homedir(), ".clawtask", "tasks.db");
+const PROJECT_DB_FILENAME = "runtime-tasks.db";
 
-export function resolveDbPath(explicitPath?: string): string {
-  return explicitPath ?? process.env.CLAWTASK_DB ?? DEFAULT_DB_PATH;
+export function getProjectDbPath(projectDir: string): string {
+  return join(resolve(projectDir), PROJECT_DB_FILENAME);
 }
 
-export function openDatabase(explicitPath?: string): Database.Database {
-  const dbPath = resolveDbPath(explicitPath);
+export function resolveDbPath(explicitPath?: string, projectDir?: string): string {
+  if (explicitPath != null) {
+    return explicitPath;
+  }
+
+  if (projectDir != null) {
+    return getProjectDbPath(projectDir);
+  }
+
+  return process.env.CLAWTASK_DB ?? DEFAULT_DB_PATH;
+}
+
+export function openDatabase(explicitPath?: string, projectDir?: string): Database.Database {
+  const dbPath = resolveDbPath(explicitPath, projectDir);
   mkdirSync(dirname(dbPath), { recursive: true });
 
   const db = new Database(dbPath);

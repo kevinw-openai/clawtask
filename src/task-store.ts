@@ -256,6 +256,32 @@ export class TaskStore {
     return tx.immediate(agentId);
   }
 
+  resumeNext(agentId: string): TaskRecord | null {
+    const tx = this.db.transaction((assignee: string) => {
+      const candidate = this.db
+        .prepare(
+          `
+            SELECT id
+            FROM tasks
+            WHERE assigned_to_agent_id = ?
+              AND status = 'in_progress'
+            ORDER BY claimed_at ASC, created_at ASC, rowid ASC
+            LIMIT 1
+          `,
+        )
+        .get(assignee) as { id: string } | undefined;
+
+      if (!candidate) {
+        return null;
+      }
+
+      this.insertEvent(candidate.id, assignee, "task_resumed", {});
+      return this.getTaskOrThrow(candidate.id);
+    });
+
+    return tx.immediate(agentId);
+  }
+
   setStatus(agentId: string, taskId: string, nextStatus: TaskStatus): TaskRecord {
     this.assertValidStatus(nextStatus);
 

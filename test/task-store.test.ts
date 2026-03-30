@@ -103,6 +103,36 @@ test("claim next selects the oldest queued task for the assignee", () => {
   }
 });
 
+test("resume next returns the oldest in-progress task for the assignee", () => {
+  const fixture = createStorePair();
+
+  try {
+    const first = fixture.storeA.createTask({
+      createdByAgentId: "agent-a",
+      assignedToAgentId: "agent-b",
+      title: "First",
+      body: "One",
+    });
+    const second = fixture.storeA.createTask({
+      createdByAgentId: "agent-a",
+      assignedToAgentId: "agent-b",
+      title: "Second",
+      body: "Two",
+    });
+
+    fixture.storeA.claimTask("agent-b", first.id);
+    fixture.storeA.claimTask("agent-b", second.id);
+
+    const resumed = fixture.storeB.resumeNext("agent-b");
+    assert.equal(resumed?.id, first.id);
+
+    const shown = fixture.storeA.showTask(first.id);
+    assert.equal(shown.events.at(-1)?.kind, "task_resumed");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("cancel queued task transitions directly to canceled", () => {
   const fixture = createStorePair();
 
